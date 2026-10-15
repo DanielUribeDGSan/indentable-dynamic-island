@@ -1,0 +1,4 @@
+module CRustCore {
+    header "dynamic_island.h"
+    export *
+}
