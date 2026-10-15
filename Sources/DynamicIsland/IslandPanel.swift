@@ -27,6 +27,10 @@ final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
     func concealFromCapture() {
         sharingType = .none
     }
@@ -108,28 +112,53 @@ final class IslandPanelController {
     }
 
     private func move(to origin: NSPoint) {
-        let clamped = clamp(origin, size: panel.frame.size)
-        panel.setFrameOrigin(clamped)
-        center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let size = panel.frame.size
+        place(center: NSPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2))
     }
 
     private func syncFrame() {
-        let size = IslandMetrics.canvas
-        var origin = NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2)
-        origin = clamp(origin, size: size)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
-        panel.contentView?.frame = NSRect(origin: .zero, size: size)
-        center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        place(center: center)
     }
 
-    private func clamp(_ origin: NSPoint, size: NSSize) -> NSPoint {
-        let probe = NSPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
-        let screen = NSScreen.screens.first { NSMouseInRect(probe, $0.frame, false) } ?? NSScreen.main
-        guard let screen else { return origin }
-        let vis = screen.visibleFrame
-        let x = min(max(origin.x, vis.minX + 6), max(vis.minX + 6, vis.maxX - size.width - 6))
-        let y = min(max(origin.y, vis.minY + 6), max(vis.minY + 6, vis.maxY - size.height - 6))
-        return NSPoint(x: x, y: y)
+    private func place(center desired: NSPoint) {
+        let size = IslandMetrics.canvas
+        let next = clampIslandCenter(desired)
+        center = next
+        let origin = NSPoint(x: next.x - size.width / 2, y: next.y - size.height / 2)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+        panel.contentView?.frame = NSRect(origin: .zero, size: size)
+    }
+
+    private func clampIslandCenter(_ point: NSPoint) -> NSPoint {
+        let island = state.layout.size
+        let margin: CGFloat = 4
+        let regions = NSScreen.screens.map { screen -> NSRect in
+            let frame = screen.frame
+            let insetX = min(island.width / 2 + margin, frame.width / 2)
+            let insetY = min(island.height / 2 + margin, frame.height / 2)
+            return NSRect(
+                x: frame.minX + insetX,
+                y: frame.minY + insetY,
+                width: max(0, frame.width - insetX * 2),
+                height: max(0, frame.height - insetY * 2)
+            )
+        }
+        guard !regions.isEmpty else { return point }
+        if regions.contains(where: { $0.contains(point) }) {
+            return point
+        }
+        var best = point
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for region in regions {
+            let x = min(max(point.x, region.minX), region.maxX)
+            let y = min(max(point.y, region.minY), region.maxY)
+            let distance = (x - point.x) * (x - point.x) + (y - point.y) * (y - point.y)
+            if distance < bestDistance {
+                bestDistance = distance
+                best = NSPoint(x: x, y: y)
+            }
+        }
+        return best
     }
 
     private func startMouseTracking() {

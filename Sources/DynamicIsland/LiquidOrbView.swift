@@ -1,4 +1,5 @@
 import AppKit
+import CoreVideo
 import Foundation
 import MetalKit
 import QuartzCore
@@ -128,7 +129,62 @@ private enum LiquidOrbError: Error {
 }
 
 private final class PassthroughMTKView: MTKView {
+    var animating = false {
+        didSet {
+            guard animating != oldValue else { return }
+            syncDisplayLink()
+        }
+    }
+
+    private var displayLink: CVDisplayLink?
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncDisplayLink()
+    }
+
+    deinit {
+        stopDisplayLink()
+    }
+
+    private func syncDisplayLink() {
+        if animating, window != nil {
+            startDisplayLink()
+        } else {
+            stopDisplayLink()
+        }
+    }
+
+    private func startDisplayLink() {
+        if displayLink != nil { return }
+        var link: CVDisplayLink?
+        guard CVDisplayLinkCreateWithActiveCGDisplays(&link) == kCVReturnSuccess, let link else { return }
+        if let screenNumber = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            CVDisplayLinkSetCurrentCGDisplay(link, CGDirectDisplayID(screenNumber.uint32Value))
+        }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        CVDisplayLinkSetOutputCallback(link, { _, _, _, _, _, userInfo in
+            guard let userInfo else { return kCVReturnSuccess }
+            let view = Unmanaged<PassthroughMTKView>.fromOpaque(userInfo).takeUnretainedValue()
+            DispatchQueue.main.async {
+                guard view.animating, view.window != nil else { return }
+                view.isPaused = true
+                view.draw()
+            }
+            return kCVReturnSuccess
+        }, context)
+        displayLink = link
+        CVDisplayLinkStart(link)
+    }
+
+    private func stopDisplayLink() {
+        if let displayLink {
+            CVDisplayLinkStop(displayLink)
+        }
+        displayLink = nil
+    }
 }
 
 private final class LiquidOrbRenderer: NSObject, MTKViewDelegate {
@@ -170,8 +226,9 @@ private final class LiquidOrbRenderer: NSObject, MTKViewDelegate {
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = true
         view.preferredFramesPerSecond = 60
-        view.enableSetNeedsDisplay = false
+        view.enableSetNeedsDisplay = true
         view.isPaused = true
+        view.autoResizeDrawable = true
         view.layer?.isOpaque = false
         view.layer?.backgroundColor = NSColor.clear.cgColor
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
@@ -373,7 +430,8 @@ private struct LiquidOrbSurface: NSViewRepresentable {
     func updateNSView(_ view: MTKView, context: Context) {
         context.coordinator.setState(state)
         context.coordinator.setAudio(audio)
-        view.isPaused = !active
+        view.isPaused = true
+        (view as? PassthroughMTKView)?.animating = active
     }
 }
 

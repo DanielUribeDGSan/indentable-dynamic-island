@@ -342,7 +342,7 @@ struct IslandView: View {
     }
 
     private func orb(side: CGFloat) -> some View {
-        LiquidOrbView(state: state.isThinking ? .thinking : .idle, active: state.isPresented)
+        LiquidOrbView(state: .thinking, active: state.isPresented)
             .frame(width: side, height: side)
             .allowsHitTesting(false)
     }
